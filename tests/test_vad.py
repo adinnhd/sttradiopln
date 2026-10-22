@@ -77,12 +77,21 @@ def test_classification_uses_official_timestamps(tmp_path, monkeypatch, probabil
 
 
 def test_brief_noisy_speech_survives_ten_second_tail(tmp_path, monkeypatch):
-    # 128 ms dengan probabilitas moderat, lalu 10 s hening: mean sangat rendah.
-    use_model(monkeypatch, [0.4] * 4 + [0.001] * 313)
-    result = SileroVAD().analyze_file(write_wav(tmp_path, samples=317 * 512))
+    # 224 ms dengan probabilitas moderat, lalu 10 s hening: mean sangat rendah.
+    use_model(monkeypatch, [0.4] * 7 + [0.001] * 313)
+    result = SileroVAD().analyze_file(write_wav(tmp_path, samples=320 * 512))
     assert result.speech_probability_mean < 0.01
-    assert result.speech_duration_seconds == pytest.approx(.128)
+    assert result.speech_duration_seconds == pytest.approx(.224)
     assert result.vad_status == "speech"
+
+
+def test_default_200ms_rejects_128ms_spike_but_100ms_is_configurable(tmp_path, monkeypatch):
+    path = write_wav(tmp_path, samples=317 * 512)
+    use_model(monkeypatch, [0.4] * 4 + [0.001] * 313)
+    assert VADConfig().min_speech_duration_ms == 200
+    assert SileroVAD().analyze_file(path).vad_status == "uncertain"
+    use_model(monkeypatch, [0.4] * 4 + [0.001] * 313)
+    assert SileroVAD(VADConfig(min_speech_duration_ms=100)).analyze_file(path).vad_status == "speech"
 
 
 def test_weak_noisy_speech_is_uncertain_not_non_speech(tmp_path, monkeypatch):

@@ -36,6 +36,7 @@ dist/
 *.wma
 /data/processed/*
 !/data/processed/.gitkeep
+/data/recordings/
 
 # Local model files and download cache
 /models/

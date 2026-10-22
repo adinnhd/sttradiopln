@@ -40,6 +40,56 @@ Jika paket/model tidak tersedia atau inferensi gagal, segmentasi tetap menghasil
 
 ## Menjalankan pipeline
 
+### Radio PLN — Windows, web lokal
+
+Untuk menerima audio langsung dari perangkat HT/USB audio, jalankan web lokal
+berikut (tanpa Windows Sound Recorder):
+
+```powershell
+python -m venv .venv                      # Sekali saja jika belum ada
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python web_app.py
+```
+
+Buka **http://127.0.0.1:8000** di browser laptop yang terhubung ke HT.
+Pilih **Perangkat input**, lalu klik **Mulai monitoring**. Daftar input mengikuti
+perangkat audio di laptop yang menjalankan Python. Pilihan mono/stereo tersedia
+di **Pengaturan audio**; default mono. Level input ditampilkan dalam dBFS. Perangkat dibaca oleh
+Python, bukan mikrofon browser. Pastikan izin mikrofon untuk aplikasi desktop
+di Windows aktif; periksa kabel, input yang dipilih, dan volume jika level diam.
+Daftar utama Windows memakai satu host API (mengutamakan WASAPI) agar perangkat
+tidak berulang. Jika input belum muncul, aktifkan **Tampilkan driver audio lainnya**
+di **Pengaturan audio** untuk membuka daftar lengkap. Perangkat yang sama dapat
+muncul lewat MME, DirectSound, dan WASAPI; ID input asli tetap dipakai untuk capture.
+
+Konfigurasi live: threshold **-50 dBFS**, pre-buffer **1 detik**, silence timeout
+**10 detik**, blok **30 ms**, minimum speech VAD **200 ms**. Tampilan awal hanya
+menampilkan `speech` (Percakapan); gunakan filter Perlu diperiksa (`uncertain`),
+Tanpa percakapan (`non-speech`), atau semua
+rekaman (termasuk yang menunggu VAD). Label bukan jaminan kebenaran; periksa audio
+yang meragukan. Parameter SAD tidak diubah dari pipeline file.
+
+WAV tersimpan di `data/recordings/YYYY-MM-DD/HH-MM-SS_<id>/rekaman_NNNN.wav`.
+`session.json` merekam perangkat dan konfigurasi; `recordings.sqlite3` menyimpan
+metadata, label, dan error. Seluruh folder ini diabaikan Git. Riwayat tetap ada
+setelah aplikasi dinyalakan ulang; pekerjaan VAD berstatus `pending` dilanjutkan.
+Arsip hasil CLI di `data/processed/` tidak diimpor otomatis ke web.
+
+VAD berjalan serial di worker terpisah setelah writer WAV ditutup, sehingga
+capture tetap berjalan saat klasifikasi berlangsung. Klik **Hentikan** untuk menutup
+dan menyimpan segmen terakhir. Menutup tab tidak menghentikan capture; hentikan
+server dengan **Ctrl+C** setelah Hentikan dan antrean VAD selesai. Jika perangkat
+terputus, aplikasi menampilkan error dan mencoba menutup segmen yang sudah ada.
+Overflow input ditampilkan sebagai peringatan audio mungkin terlewat.
+
+Jalankan satu proses saja: jangan gunakan `--reload` atau beberapa worker untuk
+recorder fisik yang sama. Server terikat ke loopback dan ditujukan untuk penggunaan
+lokal, belum untuk akses jaringan. Di Linux, `sounddevice` juga membutuhkan
+PortAudio, misalnya `sudo apt install libportaudio2`.
+
+### Pemrosesan file
+
 Input WAV diproses langsung. Input M4A dikonversi otomatis melalui FFmpeg ke WAV
 PCM 16-bit sementara, dengan sample rate dan jumlah kanal mengikuti sumber.
 File asli tidak diubah; WAV sementara dibersihkan setelah selesai atau gagal.
@@ -111,7 +161,7 @@ Rata-rata/rasio speech tidak digunakan untuk menolak percakapan. Ucapan pendek d
 |---|---:|---|
 | `--vad-speech-threshold` | 0.35 | Ambang memulai rentang speech; lebih rendah lebih sensitif |
 | `--vad-non-speech-threshold` | 0.10 | Hanya max **di bawah** nilai ini boleh `non-speech`; lebih rendah memperluas zona `uncertain` |
-| `--vad-min-speech-ms` | 100 | Rentang yang lebih pendek dibuang oleh post-processing Silero; spike tetap dapat menjadi `uncertain` |
+| `--vad-min-speech-ms` | 200 | Rentang yang lebih pendek dibuang oleh post-processing Silero; spike tetap dapat menjadi `uncertain` |
 | `--vad-min-silence-ms` | 100 | Jeda pemisah rentang speech VAD; **bukan** silence timeout RMS |
 | `--vad-min-analysis-seconds` | 0.25 | Panjang minimum untuk keputusan `non-speech` |
 
@@ -137,12 +187,12 @@ result = vad.analyze_file(Path("data/processed/run/rekaman_0001.wav"))
 print(result.vad_status, result.speech_duration_seconds, result.vad_error)
 ```
 
-Input harus WAV yang sudah ditutup. `analyze_file()` mengembalikan `VADResult`; error per file ditangkap sebagai `uncertain`. Modul tidak bergantung pada recorder atau transkripsi sehingga kelak dapat dipakai sebelum Whisper. Tahap ini tidak menambahkan Whisper, database, UI, atau perekaman USB.
+Input harus WAV yang sudah ditutup. `analyze_file()` mengembalikan `VADResult`; error per file ditangkap sebagai `uncertain`. Modul tidak bergantung pada recorder atau transkripsi sehingga kelak dapat dipakai sebelum Whisper. Web lokal menambahkan capture perangkat dan metadata SQLite; Whisper belum diterapkan.
 
 ## Pengujian dan evaluasi
 
 ```bash
-python -m pip install pytest
+python -m pip install pytest httpx
 python -m pytest -q
 ```
 
@@ -166,5 +216,8 @@ Hasil pengujian awal pada segmen proyek ada di [VAD_EVALUATION.md](VAD_EVALUATIO
 | `radio_recorder/vad.py` | Model lokal, probabilitas, durasi speech, klasifikasi, isolasi error, ringkasan |
 | `radio_recorder/report.py` | CSV dengan kolom VAD dan pembaruan metadata CSV V1 |
 | `main.py` | Integrasi setelah `finish()`, parameter CLI dan mode evaluasi ulang |
+| `web_app.py`, `web/` | API FastAPI dan tampilan monitor lokal |
+| `radio_recorder/live.py` | Input sounddevice, antrean VAD, metadata SQLite, riwayat WAV |
+| `tests/test_live.py` | Simulasi input live, Stop/disconnect, antrean VAD, filter/API/playback |
 | `tests/test_recorder.py`, `tests/test_vad.py` | Regresi RMS dan pengujian VAD/pipeline |
 | `requirements.txt` | Dependensi runtime |
