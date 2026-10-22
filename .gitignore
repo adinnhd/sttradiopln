@@ -1,0 +1,51 @@
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python bytecode and tooling caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Source recordings and generated RMS/VAD output
+*.wav
+*.m4a
+*.mp3
+*.flac
+*.ogg
+*.opus
+*.aac
+*.wma
+/data/processed/*
+!/data/processed/.gitkeep
+
+# Local model files and download cache
+/models/
+/.cache/
+
+# Logs, temporary files, and OS/editor artifacts
+*.log
+*.tmp
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

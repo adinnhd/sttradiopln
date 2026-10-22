@@ -1,0 +1,38 @@
+{
+  "evaluation_date": "2026-10-22",
+  "python": "3.12.3",
+  "dependencies": {
+    "silero-vad": "6.2.3",
+    "torch": "2.14.1+cpu",
+    "scipy": "1.18.1",
+    "numpy": "2.5.4",
+    "soundfile": "0.14.0"
+  },
+  "config": {
+    "speech_threshold": 0.35,
+    "non_speech_threshold": 0.1,
+    "min_speech_duration_ms": 100,
+    "min_silence_duration_ms": 100,
+    "min_analysis_seconds": 0.25
+  },
+  "datasets": [
+    {
+      "directory": "data/processed/ht_20261022_090920",
+      "files": 43,
+      "speech": 11,
+      "non-speech": 22,
+      "uncertain": 10,
+      "errors": 0
+    },
+    {
+      "directory": "data/processed/ht_20261022_092400",
+      "files": 12,
+      "speech": 4,
+      "non-speech": 2,
+      "uncertain": 6,
+      "errors": 0
+    }
+  ],
+  "wav_hashes_verified": 56,
+  "human_labels_available": false
+}
