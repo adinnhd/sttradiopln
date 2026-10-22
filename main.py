@@ -1,4 +1,4 @@
-"""CLI offline untuk mendeteksi dan menyimpan bagian bersuara dari WAV.
+"""CLI offline untuk mendeteksi dan menyimpan bagian bersuara dari WAV/M4A.
 
 Contoh:
     python main.py data/baseline/ht.wav --threshold-db -50
@@ -9,6 +9,9 @@ from dataclasses import asdict
 from datetime import datetime
 import json
 from pathlib import Path
+import shutil
+import subprocess
+from tempfile import TemporaryDirectory
 
 import soundfile as sf
 
@@ -28,6 +31,38 @@ def create_run_directory(base_dir: Path, source_stem: str) -> Path:
         idx += 1
     candidate.mkdir(parents=True)
     return candidate
+
+
+def process_audio(path: Path, output_root: Path, threshold_db: float,
+                  prebuffer: float, silence: float, frame_ms: int,
+                  vad_config: VADConfig | None = None) -> Path:
+    """Konversi M4A sementara; WAV langsung masuk pipeline RMS/VAD."""
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(f"File tidak ditemukan: {path}")
+    if path.suffix.lower() == ".wav":
+        return process_wav(path, output_root, threshold_db, prebuffer,
+                           silence, frame_ms, vad_config)
+    if path.suffix.lower() != ".m4a":
+        raise ValueError("Format input harus .wav atau .m4a.")
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise ValueError(
+            "Input M4A memerlukan FFmpeg di PATH. Windows: winget install Gyan.FFmpeg; "
+            "Pop!_OS/Ubuntu: sudo apt install ffmpeg. Buka ulang terminal setelah instalasi."
+        )
+    with TemporaryDirectory(prefix="radio_recorder_") as temporary_dir:
+        converted = Path(temporary_dir) / f"{path.stem}.wav"
+        print(f"Mengonversi M4A ke WAV sementara: {path}")
+        result = subprocess.run([
+            ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-n",
+            "-i", str(path.resolve()), "-map", "0:a:0", "-vn",
+            "-c:a", "pcm_s16le", str(converted),
+        ], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if result.returncode != 0:
+            raise ValueError(f"Konversi M4A gagal: {result.stderr.strip()}")
+        return process_wav(converted, output_root, threshold_db, prebuffer,
+                           silence, frame_ms, vad_config)
 
 
 def process_wav(path: Path, output_root: Path, threshold_db: float,
@@ -102,7 +137,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Segmentasi RMS radio HT, lalu klasifikasi WAV dengan Silero VAD lokal."
     )
-    parser.add_argument("input", type=Path, nargs="?", help="File WAV asli hasil rekaman HT")
+    parser.add_argument("input", type=Path, nargs="?",
+                        help="File WAV atau M4A hasil rekaman HT (M4A memerlukan FFmpeg)")
     parser.add_argument("--segments-dir", type=Path,
                         help="Klasifikasi ulang folder segmen RMS dengan segments.csv")
     parser.add_argument("--output", type=Path, default=Path("data/processed"),
@@ -127,7 +163,7 @@ def main() -> None:
                         help="WAV lebih pendek tanpa speech menjadi uncertain (default 0.25)")
     args = parser.parse_args()
     if (args.input is None) == (args.segments_dir is None):
-        parser.error("Pilih satu: input WAV atau --segments-dir")
+        parser.error("Pilih satu: input WAV/M4A atau --segments-dir")
     if not 10 <= args.frame_ms <= 100:
         parser.error("--frame-ms harus 10 sampai 100")
     if not -120 < args.threshold_db <= 0:
@@ -148,7 +184,7 @@ def main() -> None:
         if args.segments_dir is not None:
             process_segments(args.segments_dir, vad_config)
         else:
-            process_wav(args.input, args.output, args.threshold_db,
+            process_audio(args.input, args.output, args.threshold_db,
                         args.prebuffer, args.silence, args.frame_ms, vad_config)
     except (OSError, ValueError, FileNotFoundError) as exc:
         parser.exit(1, f"Error: {exc}\n")

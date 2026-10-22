@@ -40,6 +40,20 @@ Jika paket/model tidak tersedia atau inferensi gagal, segmentasi tetap menghasil
 
 ## Menjalankan pipeline
 
+Input WAV diproses langsung. Input M4A dikonversi otomatis melalui FFmpeg ke WAV
+PCM 16-bit sementara, dengan sample rate dan jumlah kanal mengikuti sumber.
+File asli tidak diubah; WAV sementara dibersihkan setelah selesai atau gagal.
+Hasil segmen tetap disimpan di `data/processed/<sumber>_<timestamp>/`.
+FFmpeg harus tersedia di PATH untuk M4A: `winget install Gyan.FFmpeg` di Windows,
+atau `sudo apt install ffmpeg` di Pop!_OS/Ubuntu. Buka ulang terminal setelah instalasi.
+
+Contoh Windows PowerShell (setelah dependensi terpasang):
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python main.py "D:\MAGANG\PROJECT\STT\record\Recording1.m4a"
+```
+
 CLI V1 tetap berlaku:
 
 ```bash
