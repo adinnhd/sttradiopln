@@ -155,8 +155,8 @@ def main() -> None:
                         help="Ambang awal speech Silero (default 0.35)")
     parser.add_argument("--vad-non-speech-threshold", type=float, default=0.10,
                         help="Non-speech hanya jika probabilitas max < nilai ini (default 0.10)")
-    parser.add_argument("--vad-min-speech-ms", type=int, default=200,
-                        help="Durasi minimum rentang speech Silero, ms (default 200)")
+    parser.add_argument("--vad-min-speech-ms", type=int, default=300,
+                        help="Durasi minimum rentang speech Silero, ms (default 300)")
     parser.add_argument("--vad-min-silence-ms", type=int, default=100,
                         help="Jeda pemisah rentang speech VAD, ms (default 100); bukan timeout RMS")
     parser.add_argument("--vad-min-analysis-seconds", type=float, default=0.25,

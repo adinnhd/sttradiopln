@@ -1,8 +1,9 @@
 """Capture perangkat lokal; satu reader audio dan satu worker VAD serial."""
 
+from collections import deque
 from dataclasses import asdict
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
 from queue import Queue
@@ -10,6 +11,7 @@ import sqlite3
 from threading import Event, Lock, Thread
 from uuid import uuid4
 
+import numpy as np
 import sounddevice as sd
 
 from .segmenter import Config, SoundTriggeredRecorder
@@ -31,6 +33,10 @@ class RecordingStore:
                 channels INTEGER NOT NULL, status TEXT NOT NULL,
                 vad_error TEXT NOT NULL DEFAULT '', metrics TEXT NOT NULL DEFAULT '{}'
             )""")
+            db.execute("CREATE INDEX IF NOT EXISTS recordings_latest "
+                       "ON recordings(started_at DESC,id DESC)")
+            db.execute("CREATE INDEX IF NOT EXISTS recordings_by_date "
+                       "ON recordings(substr(started_at,1,10),started_at DESC,id DESC)")
 
     @contextmanager
     def connect(self):
@@ -79,16 +85,25 @@ class RecordingStore:
             return [row[0] for row in db.execute(
                 "SELECT id FROM recordings WHERE status='pending' ORDER BY started_at")]
 
-    def listing(self, status="speech", limit=100):
+    def listing(self, status="speech", limit=20, page=1, recorded_date: date | None = None):
+        if not 1 <= limit <= 100 or page < 1:
+            raise ValueError("Ukuran halaman 1–100 dan nomor halaman minimal 1")
+        where = "WHERE substr(started_at,1,10)=?" if recorded_date else ""
+        parameters = [recorded_date.isoformat()] if recorded_date else []
         with self.connect() as db:
+            db.execute("BEGIN")  # Hitungan dan isi halaman memakai snapshot yang sama.
             counts = {row[0]: row[1] for row in db.execute(
-                "SELECT status,COUNT(*) FROM recordings GROUP BY status")}
-            if status == "all":
-                rows = db.execute("SELECT * FROM recordings ORDER BY started_at DESC LIMIT ?",
-                                  (limit,)).fetchall()
-            else:
-                rows = db.execute("SELECT * FROM recordings WHERE status=? "
-                                  "ORDER BY started_at DESC LIMIT ?", (status, limit)).fetchall()
+                f"SELECT status,COUNT(*) FROM recordings {where} GROUP BY status", parameters)}
+            total = sum(counts.values()) if status == "all" else counts.get(status, 0)
+            total_pages = (total + limit - 1) // limit
+            page = min(page, max(1, total_pages))
+            if status != "all":
+                where += " AND status=?" if where else "WHERE status=?"
+                parameters.append(status)
+            rows = db.execute(
+                f"SELECT * FROM recordings {where} "
+                "ORDER BY started_at DESC,id DESC LIMIT ? OFFSET ?",
+                [*parameters, limit, (page-1)*limit]).fetchall()
         items = []
         for row in rows:
             item = dict(row)
@@ -96,7 +111,9 @@ class RecordingStore:
             item["metrics"] = json.loads(item["metrics"])
             item["audio_url"] = f"/api/recordings/{item['id']}/audio"
             items.append(item)
-        return {"items": items, "counts": counts}
+        return {"items": items, "counts": counts, "total": total,
+                "page": page, "page_size": limit, "total_pages": total_pages,
+                "date": recorded_date.isoformat() if recorded_date else None}
 
 
 class LiveRecorder:
@@ -112,10 +129,13 @@ class LiveRecorder:
         self._capture = None
         self._closed = False
         self._jobs = Queue()
+        self._waveform = deque(maxlen=400)
+        self._elapsed = 0.0
         self._status = {
             "state": "stopped", "level_db": -120.0, "duration": 0.0,
             "silence_elapsed": 0.0, "device": None, "error": "",
             "overflows": 0, "vad_busy": False,
+            "device_id": None, "channels": None, "channel_mode": None,
         }
         for identifier in self.store.pending():
             self._jobs.put(identifier)
@@ -131,18 +151,27 @@ class LiveRecorder:
                 for index, device in enumerate(self.audio.query_devices())
                 if device["max_input_channels"] > 0]
 
-    def _update(self, **values):
+    def _update(self, waveform_point=None, **values):
         with self._lock:
+            if waveform_point is not None:
+                self._waveform.append(waveform_point)
+                self._elapsed = waveform_point["time"]
             self._status.update(values)
 
     def status(self):
         with self._lock:
             status = dict(self._status)
+            status["waveform"] = {
+                "window_seconds": 10,
+                "elapsed": self._elapsed,
+                "points": [point for point in self._waveform
+                           if point["time"] >= self._elapsed - 10],
+            }
         status.update(config=asdict(self.config), vad_config=asdict(self.vad_config),
                       pending=len(self.store.pending()))
         return status
 
-    def start(self, device_id: int, channels: int = 1):
+    def start(self, device_id: int, channels: int | None = None):
         with self._control:
             if self._closed:
                 raise ValueError("Recorder sudah ditutup")
@@ -151,6 +180,9 @@ class LiveRecorder:
             device = next((d for d in self.devices() if d["id"] == device_id), None)
             if device is None:
                 raise ValueError("Pilih perangkat input yang tersedia")
+            channel_mode = "auto" if channels is None else "manual"
+            if channels is None:
+                channels = min(device["max_channels"], 2)
             if not 1 <= channels <= min(device["max_channels"], 2):
                 raise ValueError("Jumlah kanal tidak didukung (pilih mono/stereo)")
             rate = device["sample_rate"]
@@ -168,14 +200,19 @@ class LiveRecorder:
                 engine = SoundTriggeredRecorder(rate, channels, directory, self.config)
                 (directory / "session.json").write_text(json.dumps({
                     "started_at": started.isoformat(), "device": device,
-                    "channels": channels, "sample_rate": rate, "frame_ms": 30,
+                    "channels": channels, "channel_mode": channel_mode,
+                    "sample_rate": rate, "frame_ms": 30,
                     "sad": asdict(self.config), "vad": asdict(self.vad_config),
                 }, indent=2), encoding="utf-8")
             except Exception:
                 stream.close()
                 raise
             self._stop.clear()
+            with self._lock:
+                self._waveform.clear()
+                self._elapsed = 0.0
             self._update(state="listening", error="", device=device["name"],
+                         device_id=device_id, channels=channels, channel_mode=channel_mode,
                          level_db=-120.0, duration=0.0, silence_elapsed=0.0, overflows=0)
             self._capture = Thread(target=self._record,
                                    args=(stream, engine, frames, started, device["name"]),
@@ -208,6 +245,11 @@ class LiveRecorder:
                 engine.levels.clear()  # Monitoring berjam-jam tidak menumpuk plot RMS.
                 recording = engine.writer is not None
                 self._update(
+                    waveform_point={
+                        "time": engine.cursor / engine.samplerate,
+                        "min": float(np.min(block)), "max": float(np.max(block)),
+                        "rms_db": level,
+                    },
                     state=("waiting" if engine.silence_frames else "recording")
                     if recording else "listening", level_db=level,
                     duration=(engine.cursor - engine.current_start) / engine.samplerate

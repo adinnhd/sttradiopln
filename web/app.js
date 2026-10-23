@@ -1,7 +1,10 @@
 import { visibleDevices } from './devices.mjs';
+import { WaveformView } from './waveform.mjs';
 
 const $ = (id) => document.getElementById(id);
+const waveform = new WaveformView($('waveform'));
 let allDevices = [], devices = [], filter = 'speech', busy = false, connected = false;
+let page = 1, selectedDate = '', listLoading = true;
 let listSignature = '', lastConfig = null, lastStatus = null;
 const labels = {speech:'Percakapan', uncertain:'Perlu diperiksa', 'non-speech':'Tanpa percakapan', pending:'Sedang diperiksa'};
 const stateLabels = {stopped:'Tidak aktif', listening:'Mendengarkan', recording:'Merekam', waiting:'Menunggu hening', error:'Terhenti'};
@@ -23,10 +26,13 @@ function controls() {
 }
 function deviceHint() {
   const device = devices.find(d => String(d.id) === $('device').value);
-  $('channels').options[1].disabled = !device || device.max_channels < 2;
-  if ($('channels').options[1].disabled) $('channels').value = '1';
+  const stereoOption = [...$('channels').options].find(option => option.value === '2');
+  stereoOption.disabled = !device || device.max_channels < 2;
+  if (stereoOption.disabled && $('channels').value === '2') $('channels').value = 'auto';
+  const automatic = $('channels').value === 'auto';
+  const channels = device ? (automatic ? Math.min(device.max_channels, 2) : Number($('channels').value)) : null;
   $('device-hint').textContent = device
-    ? `Perangkat dipilih: ${device.name}`
+    ? `${device.name} · ${automatic ? 'Otomatis' : 'Manual'}: ${channels} kanal`
     : devices.length
       ? 'Pilih input yang terhubung ke radio. Jika belum muncul, buka Pengaturan audio.'
       : 'Belum ada perangkat input. Sambungkan perangkat, lalu klik Perbarui.';
@@ -47,16 +53,21 @@ function populateDevices() {
     $('device').add(new Option(duplicate ? `${d.name} (${d.hostapi})` : d.name, String(d.id)));
   });
   if (devices.some(d => String(d.id) === previous)) $('device').value = previous;
+  if ($('device').value !== previous) $('channels').value = 'auto';
   deviceHint();
 }
 function renderStatus(s) {
   lastStatus = s;
+  const active = ['listening','recording','waiting'].includes(s.state);
+  waveform.update(s.waveform, active);
+  if (active && devices.some(device => device.id === s.device_id)) {
+    $('device').value = String(s.device_id);
+    $('channels').value = s.channel_mode === 'auto' ? 'auto' : String(s.channels);
+    deviceHint();
+  }
   const state = $('state'); state.dataset.state = s.state;
   state.replaceChildren(document.createElement('i'), document.createTextNode(stateLabels[s.state] || s.state));
   $('level').textContent = s.level_db <= -120 ? '—' : s.level_db.toFixed(1);
-  const percent = Math.max(0, Math.min(100, (s.level_db + 90) / 90 * 100));
-  $('meter-fill').style.width = `${percent}%`;
-  document.querySelector('.meter').setAttribute('aria-valuenow', Math.max(-90, s.level_db).toFixed(1));
   const seconds = Math.floor(s.duration);
   $('duration').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
   const messages = {
@@ -76,7 +87,6 @@ function renderStatus(s) {
     $('cfg-prebuffer').textContent = `${s.config.prebuffer_seconds} detik`;
     $('cfg-silence').textContent = `${s.config.silence_seconds} detik`;
     $('cfg-vad').textContent = `${s.vad_config.min_speech_duration_ms} ms`;
-    document.querySelector('.threshold-marker').style.left = `${(s.config.threshold_db+90)/90*100}%`;
     lastConfig = config;
   }
   if (s.error) notice(s.error);
@@ -91,10 +101,21 @@ function element(tag, text, className) {
 function renderRecordings(data) {
   for (const key of ['speech','uncertain','non-speech']) $(`count-${key}`).textContent = data.counts[key] || 0;
   $('total-count').textContent = Object.values(data.counts).reduce((sum,n) => sum+n,0);
-  const signature = JSON.stringify([filter,data.items]);
-  if (signature === listSignature) return;
+  const signature = JSON.stringify([filter,selectedDate,data.page,data.total,data.items]);
   // Jangan mengganti elemen audio yang sedang diputar saat polling.
   if ([...document.querySelectorAll('audio')].some(a => !a.paused)) return;
+  page = data.page;
+  listLoading = false;
+  const from = data.total ? (page-1)*data.page_size+1 : 0;
+  const to = data.total ? from+data.items.length-1 : 0;
+  const summary = data.total
+    ? `Menampilkan ${from}–${to} dari ${data.total} rekaman`
+    : '0 rekaman sesuai filter';
+  if ($('pagination-summary').textContent !== summary) $('pagination-summary').textContent = summary;
+  $('page-status').textContent = data.total ? `Halaman ${page} dari ${data.total_pages}` : '';
+  $('previous-page').disabled = page <= 1;
+  $('next-page').disabled = page >= data.total_pages;
+  if (signature === listSignature) return;
   listSignature = signature;
   const list = $('recording-list'); list.replaceChildren();
   if (!data.items.length) {
@@ -121,6 +142,20 @@ function renderRecordings(data) {
     row.append(details,audio); list.append(row);
   }
 }
+function recordingsQuery() {
+  const query = new URLSearchParams({status:filter, page:String(page), page_size:'20'});
+  if (selectedDate) query.set('date',selectedDate);
+  return query.toString();
+}
+function changeRecordingsPage(nextPage = 1) {
+  page = nextPage;
+  listSignature = '';
+  listLoading = true;
+  $('previous-page').disabled = $('next-page').disabled = true;
+  $('pagination-summary').textContent = 'Memuat rekaman...';
+  $('page-status').textContent = '';
+  document.querySelectorAll('audio').forEach(audio => audio.pause());
+}
 async function command(path, body) {
   busy = true; controls(); notice();
   try {
@@ -133,17 +168,26 @@ async function poll() {
     const status = await api('/api/status');
     if (!connected) notice();
     connected = true; renderStatus(status);
-    const requestedFilter = filter;
-    const recordings = await api(`/api/recordings?status=${requestedFilter}`);
-    if (requestedFilter === filter) renderRecordings(recordings);
+    const query = recordingsQuery();
+    const recordings = await api(`/api/recordings?${query}`);
+    if (query === recordingsQuery()) renderRecordings(recordings);
   } catch (error) {
+    waveform.update(waveform.data, false);
+    $('previous-page').disabled = $('next-page').disabled = true;
     connected = false; controls(); notice(`Koneksi ke aplikasi terputus. Pastikan server lokal masih berjalan. ${error.message}`);
   } finally { setTimeout(poll,500); }
 }
-$('start').addEventListener('click',() => command('/api/start',{device_id:Number($('device').value),channels:Number($('channels').value)}));
+$('start').addEventListener('click',() => command('/api/start',{
+  device_id:Number($('device').value),
+  channels:$('channels').value === 'auto' ? null : Number($('channels').value)
+}));
 $('stop').addEventListener('click',() => command('/api/stop'));
 $('refresh').addEventListener('click',loadDevices);
-$('device').addEventListener('change',deviceHint);
+$('device').addEventListener('change',() => {
+  $('channels').value = 'auto';
+  deviceHint();
+});
+$('channels').addEventListener('change',deviceHint);
 $('all-drivers').addEventListener('change',populateDevices);
 document.querySelectorAll('.tab').forEach(button => button.addEventListener('click',() => {
   filter = button.dataset.filter;
@@ -151,8 +195,24 @@ document.querySelectorAll('.tab').forEach(button => button.addEventListener('cli
     b.classList.toggle('selected',b === button);
     b.setAttribute('aria-pressed',String(b === button));
   });
-  document.querySelectorAll('audio').forEach(a => a.pause()); listSignature = '';
+  changeRecordingsPage();
 }));
+$('recording-date').addEventListener('change',() => {
+  selectedDate = $('recording-date').value;
+  $('clear-date').disabled = !selectedDate;
+  changeRecordingsPage();
+});
+$('clear-date').addEventListener('click',() => {
+  selectedDate = $('recording-date').value = '';
+  $('clear-date').disabled = true;
+  changeRecordingsPage();
+});
+$('previous-page').addEventListener('click',() => {
+  if (!listLoading && page > 1) changeRecordingsPage(page-1);
+});
+$('next-page').addEventListener('click',() => {
+  if (!listLoading) changeRecordingsPage(page+1);
+});
 function clock() {
   const now = new Date();
   $('clock').textContent = now.toLocaleTimeString('id-ID',{hour12:false});

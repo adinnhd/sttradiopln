@@ -53,9 +53,23 @@ python web_app.py
 ```
 
 Buka **http://127.0.0.1:8000** di browser laptop yang terhubung ke HT.
+Panel Sinyal masuk menampilkan waveform sederhana satu warna, penanda waktu,
+dan garis posisi merah seperti recorder biasa. Riwayat 10 detik bergerak di kiri
+garis; area kanan kosong karena belum direkam. Grafik memakai amplop puncak dari
+blok 30 ms input Python yang sama dengan recorder, tanpa mikrofon browser atau
+downmix stereo. Tinggi gelombang dikompresi secara visual agar suara pelan tetap
+terlihat; ini tidak mengubah WAV. Puncak singkat dipertahankan saat batang grafik
+digabung untuk menyesuaikan ukuran layar. Riwayat dibersihkan pada sesi baru dan
+dibekukan saat Stop. Angka RMS dBFS dan nilai ambang tetap tersedia di luar grafik.
+
 Pilih **Perangkat input**, lalu klik **Mulai monitoring**. Daftar input mengikuti
-perangkat audio di laptop yang menjalankan Python. Pilihan mono/stereo tersedia
-di **Pengaturan audio**; default mono. Level input ditampilkan dalam dBFS. Perangkat dibaca oleh
+perangkat audio di laptop yang menjalankan Python. Kanal default **Otomatis**:
+2 kanal jika perangkat mendukungnya, atau 1 kanal jika hanya mendukung mono.
+Pemilihan dibaca ulang dari perangkat di laptop yang digunakan; tidak memakai
+ID perangkat dari laptop lain. **Pengaturan audio → Mode kanal (lanjutan)**
+menyediakan override mono/stereo untuk troubleshooting. Jika konfigurasi gagal,
+aplikasi menampilkan error tanpa fallback ke mono. Kanal aktual dan mode pemilihan
+dicatat dalam `session.json` dan status API. Level input ditampilkan dalam dBFS. Perangkat dibaca oleh
 Python, bukan mikrofon browser. Pastikan izin mikrofon untuk aplikasi desktop
 di Windows aktif; periksa kabel, input yang dipilih, dan volume jika level diam.
 Daftar utama Windows memakai satu host API (mengutamakan WASAPI) agar perangkat
@@ -64,10 +78,16 @@ di **Pengaturan audio** untuk membuka daftar lengkap. Perangkat yang sama dapat
 muncul lewat MME, DirectSound, dan WASAPI; ID input asli tetap dipakai untuk capture.
 
 Konfigurasi live: threshold **-50 dBFS**, pre-buffer **1 detik**, silence timeout
-**10 detik**, blok **30 ms**, minimum speech VAD **200 ms**. Tampilan awal hanya
+**10 detik**, blok **30 ms**, minimum speech VAD **300 ms**. Tampilan awal hanya
 menampilkan `speech` (Percakapan); gunakan filter Perlu diperiksa (`uncertain`),
 Tanpa percakapan (`non-speech`), atau semua
-rekaman (termasuk yang menunggu VAD). Label bukan jaminan kebenaran; periksa audio
+rekaman (termasuk yang menunggu VAD). Daftar diurutkan terbaru dahulu dan ditampilkan
+20 rekaman per halaman. Gunakan **Sebelumnya/Berikutnya** untuk arsip lama serta
+**Tanggal rekaman** untuk satu tanggal (berdasarkan tanggal lokal saat direkam).
+**Semua tanggal** menghapus filter tanggal. Jumlah kategori mengikuti tanggal
+yang dipilih; keterangan seperti “1–20 dari 245 rekaman” mengikuti kategori aktif.
+Mengganti tanggal/kategori kembali ke halaman pertama. Semua WAV tetap disimpan;
+pagination hanya membatasi tampilan, bukan jumlah arsip. Label bukan jaminan kebenaran; periksa audio
 yang meragukan. Parameter SAD tidak diubah dari pipeline file.
 
 WAV tersimpan di `data/recordings/YYYY-MM-DD/HH-MM-SS_<id>/rekaman_NNNN.wav`.
@@ -87,6 +107,7 @@ Jalankan satu proses saja: jangan gunakan `--reload` atau beberapa worker untuk
 recorder fisik yang sama. Server terikat ke loopback dan ditujukan untuk penggunaan
 lokal, belum untuk akses jaringan. Di Linux, `sounddevice` juga membutuhkan
 PortAudio, misalnya `sudo apt install libportaudio2`.
+
 
 ### Pemrosesan file
 
@@ -161,7 +182,7 @@ Rata-rata/rasio speech tidak digunakan untuk menolak percakapan. Ucapan pendek d
 |---|---:|---|
 | `--vad-speech-threshold` | 0.35 | Ambang memulai rentang speech; lebih rendah lebih sensitif |
 | `--vad-non-speech-threshold` | 0.10 | Hanya max **di bawah** nilai ini boleh `non-speech`; lebih rendah memperluas zona `uncertain` |
-| `--vad-min-speech-ms` | 200 | Rentang yang lebih pendek dibuang oleh post-processing Silero; spike tetap dapat menjadi `uncertain` |
+| `--vad-min-speech-ms` | 300 | Rentang yang lebih pendek dibuang oleh post-processing Silero; spike tetap dapat menjadi `uncertain` |
 | `--vad-min-silence-ms` | 100 | Jeda pemisah rentang speech VAD; **bukan** silence timeout RMS |
 | `--vad-min-analysis-seconds` | 0.25 | Panjang minimum untuk keputusan `non-speech` |
 
@@ -194,6 +215,12 @@ Input harus WAV yang sudah ditutup. `analyze_file()` mengembalikan `VADResult`; 
 ```bash
 python -m pip install pytest httpx
 python -m pytest -q
+```
+
+Tes renderer grafik (opsional, membutuhkan Node.js):
+
+```bash
+node --test tests/test_waveform.mjs
 ```
 
 Tes mencakup klasifikasi tiga status, spike speech, ucapan pendek dengan ekor hening 10 detik, indikasi speech lemah, window parsial, stereo berlawanan fase, resampling 8/16/44.1/48 kHz, model gagal dimuat, inferensi gagal, file kosong/hilang, CSV V1, CLI lama, dan kesamaan byte WAV serta waktu RMS pada setiap hasil VAD. Tes beep 2 kHz, buzz 100 Hz, dan noise memakai **model Silero asli setelah segmentasi RMS**. Beep 1 kHz yang memicu indikasi singkat tetap diuji sebagai `uncertain`. Dua tes tambahan memakai sampel radio lokal dengan noise SNR 0/-5 dB; tes ini dilewati jika sampel proyek tidak tersedia. Tidak ada model uji yang perlu diunduh saat tes.

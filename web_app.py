@@ -1,10 +1,11 @@
 """Web recorder lokal. Jalankan: python web_app.py (satu proses)."""
 
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -18,7 +19,7 @@ ROOT = Path(__file__).resolve().parent
 
 class StartRequest(BaseModel):
     device_id: int = Field(ge=0)
-    channels: int = Field(default=1, ge=1, le=2)
+    channels: int | None = Field(default=None, ge=1, le=2)
 
 
 def create_app(recorder=None):
@@ -81,8 +82,12 @@ def create_app(recorder=None):
 
     @app.get("/api/recordings")
     def recordings(request: Request,
-                   status: Literal["speech", "uncertain", "non-speech", "pending", "all"] = "speech"):
-        return request.app.state.recorder.store.listing(status)
+                   status: Literal["speech", "uncertain", "non-speech", "pending", "all"] = "speech",
+                   page: int = Query(default=1, ge=1),
+                   page_size: int = Query(default=20, ge=1, le=100),
+                   recorded_date: date | None = Query(default=None, alias="date")):
+        return request.app.state.recorder.store.listing(
+            status, limit=page_size, page=page, recorded_date=recorded_date)
 
     @app.get("/api/recordings/{identifier}/audio")
     def audio(identifier: str, request: Request):
