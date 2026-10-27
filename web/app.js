@@ -6,6 +6,9 @@ const waveform = new WaveformView($('waveform'));
 let allDevices = [], devices = [], filter = 'speech', busy = false, connected = false;
 let page = 1, selectedDate = '', listLoading = true;
 let listSignature = '', lastConfig = null, lastStatus = null;
+let selectAll = false, filteredTotal = 0;
+let selectionBusy = false, listRevision = 0;
+const selectedRecordings = new Set(), excludedRecordings = new Set();
 const labels = {speech:'Percakapan', uncertain:'Perlu diperiksa', 'non-speech':'Tanpa percakapan', pending:'Sedang diperiksa'};
 const stateLabels = {stopped:'Tidak aktif', listening:'Mendengarkan', recording:'Merekam', waiting:'Menunggu hening', error:'Terhenti'};
 function notice(message='') { $('notice').textContent = message; $('notice').hidden = !message; }
@@ -98,14 +101,51 @@ function element(tag, text, className) {
   if (className) node.className = className;
   return node;
 }
+function isSelected(id) {
+  return selectAll ? !excludedRecordings.has(id) : selectedRecordings.has(id);
+}
+function updateSelection() {
+  const count = selectAll ? Math.max(0,filteredTotal-excludedRecordings.size) : selectedRecordings.size;
+  const all = $('select-all-recordings');
+  all.disabled = selectionBusy || listLoading || filteredTotal === 0;
+  all.checked = selectAll && excludedRecordings.size === 0 && filteredTotal > 0;
+  all.indeterminate = count > 0 && !all.checked;
+  $('selection-summary').textContent = `${count} rekaman dipilih${selectAll ? ' di semua halaman' : ''}`;
+  $('download-recordings').textContent = `Download terpilih (${count})`;
+  $('download-recordings').disabled = selectionBusy || listLoading || count === 0;
+  const inTrash = filter === 'trash';
+  $('trash-recordings').hidden = inTrash;
+  $('restore-recordings').hidden = !inTrash;
+  $('trash-note').hidden = !inTrash;
+  $('trash-recordings').textContent = `Hapus terpilih (${count})`;
+  $('restore-recordings').textContent = `Pulihkan terpilih (${count})`;
+  $('trash-recordings').disabled = $('restore-recordings').disabled = selectionBusy || listLoading || count === 0;
+  document.querySelectorAll('.tab, #recording-date, #clear-date').forEach(control => {
+    control.disabled = selectionBusy || (control.id === 'clear-date' && !selectedDate);
+  });
+  document.querySelectorAll('.recording-checkbox').forEach(box => {
+    box.checked = isSelected(box.dataset.id);
+    box.disabled = selectionBusy;
+  });
+}
+function resetSelection() {
+  selectAll = false;
+  filteredTotal = 0;
+  selectedRecordings.clear();
+  excludedRecordings.clear();
+  updateSelection();
+}
 function renderRecordings(data) {
+  $('count-trash').textContent = data.trash_count || 0;
   for (const key of ['speech','uncertain','non-speech']) $(`count-${key}`).textContent = data.counts[key] || 0;
   $('total-count').textContent = Object.values(data.counts).reduce((sum,n) => sum+n,0);
+  filteredTotal = data.total;
   const signature = JSON.stringify([filter,selectedDate,data.page,data.total,data.items]);
   // Jangan mengganti elemen audio yang sedang diputar saat polling.
   if ([...document.querySelectorAll('audio')].some(a => !a.paused)) return;
   page = data.page;
   listLoading = false;
+  updateSelection();
   const from = data.total ? (page-1)*data.page_size+1 : 0;
   const to = data.total ? from+data.items.length-1 : 0;
   const summary = data.total
@@ -127,6 +167,23 @@ function renderRecordings(data) {
     const row = element('article','','recording'), details = element('div','');
     row.dataset.status = item.status;
     const date = new Date(item.started_at);
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'recording-checkbox';
+    checkbox.dataset.id = item.id;
+    checkbox.checked = isSelected(item.id);
+    checkbox.disabled = selectionBusy;
+    checkbox.setAttribute('aria-label',`Pilih rekaman ${date.toLocaleString('id-ID')}`);
+    checkbox.addEventListener('change',() => {
+      if (selectAll) {
+        if (checkbox.checked) excludedRecordings.delete(item.id);
+        else excludedRecordings.add(item.id);
+      } else {
+        if (checkbox.checked) selectedRecordings.add(item.id);
+        else selectedRecordings.delete(item.id);
+      }
+      updateSelection();
+    });
     const heading = element('h3',date.toLocaleTimeString('id-ID',{hour12:false}));
     heading.append(element('span',labels[item.status] || item.status,'badge'));
     details.append(heading,element('p',`${date.toLocaleDateString('id-ID')} · ${item.duration.toFixed(1)} detik · ${item.device}`));
@@ -139,7 +196,7 @@ function renderRecordings(data) {
     const audio = document.createElement('audio'); audio.controls = true; audio.preload = 'none'; audio.src = item.audio_url;
     audio.setAttribute('aria-label',`Putar rekaman ${date.toLocaleTimeString('id-ID')}`);
     audio.addEventListener('play',() => document.querySelectorAll('audio').forEach(a => {if(a !== audio) a.pause();}));
-    row.append(details,audio); list.append(row);
+    row.append(checkbox,details,audio); list.append(row);
   }
 }
 function recordingsQuery() {
@@ -152,6 +209,7 @@ function changeRecordingsPage(nextPage = 1) {
   listSignature = '';
   listLoading = true;
   $('previous-page').disabled = $('next-page').disabled = true;
+  updateSelection();
   $('pagination-summary').textContent = 'Memuat rekaman...';
   $('page-status').textContent = '';
   document.querySelectorAll('audio').forEach(audio => audio.pause());
@@ -169,8 +227,9 @@ async function poll() {
     if (!connected) notice();
     connected = true; renderStatus(status);
     const query = recordingsQuery();
+    const revision = listRevision;
     const recordings = await api(`/api/recordings?${query}`);
-    if (query === recordingsQuery()) renderRecordings(recordings);
+    if (query === recordingsQuery() && revision === listRevision && !selectionBusy) renderRecordings(recordings);
   } catch (error) {
     waveform.update(waveform.data, false);
     $('previous-page').disabled = $('next-page').disabled = true;
@@ -190,6 +249,7 @@ $('device').addEventListener('change',() => {
 $('channels').addEventListener('change',deviceHint);
 $('all-drivers').addEventListener('change',populateDevices);
 document.querySelectorAll('.tab').forEach(button => button.addEventListener('click',() => {
+  if (filter !== button.dataset.filter) resetSelection();
   filter = button.dataset.filter;
   document.querySelectorAll('.tab').forEach(b => {
     b.classList.toggle('selected',b === button);
@@ -198,15 +258,62 @@ document.querySelectorAll('.tab').forEach(button => button.addEventListener('cli
   changeRecordingsPage();
 }));
 $('recording-date').addEventListener('change',() => {
+  resetSelection();
   selectedDate = $('recording-date').value;
   $('clear-date').disabled = !selectedDate;
   changeRecordingsPage();
 });
 $('clear-date').addEventListener('click',() => {
+  resetSelection();
   selectedDate = $('recording-date').value = '';
   $('clear-date').disabled = true;
   changeRecordingsPage();
 });
+$('download-recordings').addEventListener('click',() => {
+  const query = new URLSearchParams({status:filter});
+  if (selectedDate) query.set('date',selectedDate);
+  const ids = selectAll ? excludedRecordings : selectedRecordings;
+  for (const id of ids) query.append(selectAll ? 'exclude' : 'id',id);
+  window.location.assign(`/api/recordings/download?${query}`);
+});
+$('select-all-recordings').addEventListener('change',() => {
+  selectAll = $('select-all-recordings').checked;
+  selectedRecordings.clear();
+  excludedRecordings.clear();
+  updateSelection();
+});
+async function changeTrash(restore = false) {
+  if (selectionBusy || listLoading) return;
+  const count = selectAll ? Math.max(0,filteredTotal-excludedRecordings.size) : selectedRecordings.size;
+  if (!count) return;
+  const scope = `${filter === 'trash' ? 'Sampah' : labels[filter] || 'Semua rekaman'}, ${selectedDate || 'semua tanggal'}`;
+  const action = restore ? 'Pulihkan' : 'Pindahkan ke Sampah';
+  if (!window.confirm(`${action} ${count} rekaman (${scope})?${selectAll ? '\nPilihan ini mencakup semua halaman.' : ''}${restore ? '' : '\nRekaman bisa dipulihkan dari tab Sampah.'}`)) return;
+  const body = {
+    status:filter, recorded_date:selectedDate || null, select_all:selectAll,
+    identifiers:[...selectedRecordings], excluded:[...excludedRecordings], expected_count:count,
+  };
+  selectionBusy = true;
+  listRevision++;
+  updateSelection();
+  try {
+    const result = await api(`/api/recordings/${restore ? 'restore' : 'trash'}`, {
+      method:'POST', headers:{'Content-Type':'application/json','X-Recorder-Control':'1'},
+      body:JSON.stringify(body),
+    });
+    resetSelection();
+    changeRecordingsPage();
+    notice(`${result.count} rekaman ${restore ? 'dipulihkan' : 'dipindahkan ke Sampah'}.`);
+  } catch (error) {
+    notice(error.message);
+  } finally {
+    selectionBusy = false;
+    listRevision++;
+    updateSelection();
+  }
+}
+$('trash-recordings').addEventListener('click',() => changeTrash());
+$('restore-recordings').addEventListener('click',() => changeTrash(true));
 $('previous-page').addEventListener('click',() => {
   if (!listLoading && page > 1) changeRecordingsPage(page-1);
 });

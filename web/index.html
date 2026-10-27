@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Perekaman dan pemantauan komunikasi radio PLN.">
   <title>Radio PLN — Monitoring komunikasi</title>
-  <link rel="stylesheet" href="/static/style.css">
-  <script src="/static/app.js" type="module"></script>
+  <link rel="stylesheet" href="/static/style.css?v=trash-1">
+  <script src="/static/app.js?v=trash-1" type="module"></script>
 </head>
 <body>
   <header class="app-header">
@@ -49,7 +49,9 @@
     <section class="recordings" aria-labelledby="recordings-heading">
       <div class="recordings-heading"><div><h2 id="recordings-heading">Rekaman komunikasi <span id="total-count" class="count">0</span></h2><p>Putar dan periksa hasil rekaman. Semua audio tetap tersimpan.</p></div><span id="queue-status" class="processing" role="status" hidden></span></div>
       <div class="recording-filters"><label for="recording-date">Tanggal rekaman</label><input id="recording-date" type="date"><button id="clear-date" class="secondary" disabled>Semua tanggal</button></div>
-      <div class="tabs" role="group" aria-label="Filter rekaman"><button class="tab selected" aria-pressed="true" data-filter="speech">Percakapan <span id="count-speech">0</span></button><button class="tab" aria-pressed="false" data-filter="uncertain">Perlu diperiksa <span id="count-uncertain">0</span></button><button class="tab" aria-pressed="false" data-filter="non-speech">Tanpa percakapan <span id="count-non-speech">0</span></button><button class="tab" aria-pressed="false" data-filter="all">Semua rekaman</button></div>
+      <div class="tabs" role="group" aria-label="Filter rekaman"><button class="tab selected" aria-pressed="true" data-filter="speech">Percakapan <span id="count-speech">0</span></button><button class="tab" aria-pressed="false" data-filter="uncertain">Perlu diperiksa <span id="count-uncertain">0</span></button><button class="tab" aria-pressed="false" data-filter="non-speech">Tanpa percakapan <span id="count-non-speech">0</span></button><button class="tab" aria-pressed="false" data-filter="all">Semua rekaman</button><button class="tab" aria-pressed="false" data-filter="trash">Sampah <span id="count-trash">0</span></button></div>
+      <div class="selection-toolbar"><label class="select-all-label"><input id="select-all-recordings" type="checkbox" disabled> Pilih semua hasil filter</label><span id="selection-summary" role="status">0 rekaman dipilih</span><button id="download-recordings" class="secondary download-recordings" disabled>Download terpilih (0)</button><button id="trash-recordings" class="secondary danger" disabled>Hapus terpilih (0)</button><button id="restore-recordings" class="secondary" hidden disabled>Pulihkan terpilih (0)</button></div>
+      <p id="trash-note" class="trash-note" hidden>Rekaman di Sampah bisa dipulihkan. File audio tetap tersimpan dan masih memakai ruang penyimpanan.</p>
       <div id="recording-list" class="recording-list"><div class="empty"><h3>Belum ada percakapan</h3><p>Rekaman percakapan akan muncul setelah komunikasi selesai diperiksa.</p></div></div>
       <div class="pagination"><p id="pagination-summary" role="status">Memuat rekaman...</p><div class="pagination-controls"><button id="previous-page" class="secondary" disabled>Sebelumnya</button><span id="page-status"></span><button id="next-page" class="secondary" disabled>Berikutnya</button></div></div>
     </section>

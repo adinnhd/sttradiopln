@@ -86,8 +86,18 @@ rekaman (termasuk yang menunggu VAD). Daftar diurutkan terbaru dahulu dan ditamp
 **Tanggal rekaman** untuk satu tanggal (berdasarkan tanggal lokal saat direkam).
 **Semua tanggal** menghapus filter tanggal. Jumlah kategori mengikuti tanggal
 yang dipilih; keterangan seperti “1–20 dari 245 rekaman” mengikuti kategori aktif.
-Mengganti tanggal/kategori kembali ke halaman pertama. Semua WAV tetap disimpan;
-pagination hanya membatasi tampilan, bukan jumlah arsip. Label bukan jaminan kebenaran; periksa audio
+Mengganti tanggal/kategori kembali ke halaman pertama dan menghapus pilihan.
+Centang rekaman yang ingin diunduh, atau centang **Pilih semua hasil filter** untuk
+memilih seluruh halaman pada kategori dan tanggal aktif. Pilihan bertahan saat
+berpindah halaman; hilangkan centang per rekaman untuk mengecualikannya.
+**Download terpilih** mengunduh pilihan sebagai satu ZIP.
+
+**Hapus terpilih** meminta konfirmasi jumlah dan filter, lalu memindahkan pilihan
+ke tab **Sampah**. Di sana, centang rekaman lalu klik **Pulihkan terpilih** untuk
+mengembalikannya ke kategori semula. Sampah tidak otomatis dikosongkan; file WAV
+tetap tersimpan dan masih memakai ruang penyimpanan. Pilihan semua hasil filter
+juga berlaku untuk hapus dan pulihkan lintas halaman.
+Pagination hanya membatasi tampilan, bukan jumlah arsip. Label bukan jaminan kebenaran; periksa audio
 yang meragukan. Parameter SAD tidak diubah dari pipeline file.
 
 WAV tersimpan di `data/recordings/YYYY-MM-DD/HH-MM-SS_<id>/rekaman_NNNN.wav`.

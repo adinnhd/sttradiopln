@@ -1,8 +1,10 @@
 from datetime import date, datetime, timedelta, timezone
+from io import BytesIO
 import json
 from queue import Empty, Queue
 from threading import Event
 import time
+from zipfile import ZipFile
 
 import numpy as np
 import pytest
@@ -310,6 +312,92 @@ def test_recording_path_cannot_escape_archive(tmp_path):
         db.execute("UPDATE recordings SET path='../outside.wav' WHERE id=?", (identifier,))
     with pytest.raises(FileNotFoundError):
         store.audio_path(identifier)
+    with pytest.raises(FileNotFoundError):
+        store.archive_files()
+
+
+def test_download_zip_uses_status_and_date_filters(tmp_path):
+    recorder = LiveRecorder(tmp_path, FakeAudio(), FakeVAD())
+    start = datetime(2026, 10, 23, 9, tzinfo=timezone(timedelta(hours=7)))
+    identifiers = []
+    for index, (status, started_at) in enumerate([
+            ("speech", start), ("uncertain", start + timedelta(minutes=1)),
+            ("speech", start - timedelta(days=1))]):
+        path = tmp_path / f"clip_{index}.wav"
+        sf.write(path, active_block(), 16000)
+        segment = Segment(index + 1, path.name, 0, 480, 16000)
+        identifier = recorder.store.register(
+            path, segment, started_at, "USB HT", 1)
+        recorder.store.complete(identifier, VADResult(vad_status=status))
+        identifiers.append(identifier)
+
+    with TestClient(create_app(recorder)) as client:
+        response = client.get(
+            "/api/recordings/download?status=speech&date=2026-10-23")
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/zip"
+        assert response.headers["content-disposition"] == (
+            'attachment; filename="rekaman_speech_2026-10-23.zip"')
+        with ZipFile(BytesIO(response.content)) as archive:
+            assert archive.namelist() == [
+                f"speech_2026-10-23T09-00-00_07-00_{identifiers[0][:8]}.wav"]
+            assert archive.read(archive.namelist()[0]).startswith(b"RIFF")
+
+        response = client.get(
+            "/api/recordings/download?status=all&date=2026-10-23")
+        with ZipFile(BytesIO(response.content)) as archive:
+            assert len(archive.namelist()) == 2
+            assert archive.namelist()[0].startswith("uncertain_")
+            assert archive.namelist()[1].startswith("speech_")
+
+        assert client.get(
+            "/api/recordings/download?status=speech&date=2026-10-24").status_code == 404
+        assert client.get(
+            "/api/recordings/download?status=invalid").status_code == 422
+        assert client.get(
+            "/api/recordings/download?date=not-a-date").status_code == 422
+
+        response = client.get("/api/recordings/download", params={
+            "status": "all", "id": identifiers[1]})
+        with ZipFile(BytesIO(response.content)) as archive:
+            assert len(archive.namelist()) == 1
+            assert archive.namelist()[0].startswith("uncertain_")
+            assert archive.read(archive.namelist()[0]) == (tmp_path / "clip_1.wav").read_bytes()
+
+        response = client.get("/api/recordings/download", params={
+            "status": "all", "date": "2026-10-23", "exclude": identifiers[1]})
+        with ZipFile(BytesIO(response.content)) as archive:
+            assert len(archive.namelist()) == 1
+            assert archive.namelist()[0].startswith("speech_")
+
+        # ID yang berada di luar filter tidak boleh ikut terunduh.
+        assert client.get("/api/recordings/download", params={
+            "status": "speech", "id": identifiers[1]}).status_code == 404
+        assert client.get("/api/recordings/download", params={
+            "id": "../outside.wav"}).status_code == 404
+
+
+def test_download_selection_spans_all_pages(tmp_path):
+    recorder = LiveRecorder(tmp_path, FakeAudio(), FakeVAD())
+    seed_paginated_archive(recorder.store)
+    original = b"RIFF-test-unchanged-WAV-bytes"
+    with recorder.store.connect() as db:
+        rows = db.execute("SELECT path FROM recordings").fetchall()
+    for row in rows:
+        path = tmp_path / row["path"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(original)
+    with TestClient(create_app(recorder)) as client:
+        response = client.get("/api/recordings/download?status=speech&date=2026-10-23")
+        with ZipFile(BytesIO(response.content)) as archive:
+            assert len(archive.namelist()) == 32
+            assert all(archive.read(name) == original for name in archive.namelist())
+        response = client.get("/api/recordings/download", params=[
+            ("status", "all"), ("id", "r0000"), ("id", "r0124")])
+        with ZipFile(BytesIO(response.content)) as archive:
+            assert len(archive.namelist()) == 2
+            assert any("r0000" in name for name in archive.namelist())
+            assert any("r0124" in name for name in archive.namelist())
 
 
 def seed_paginated_archive(store):
@@ -390,3 +478,57 @@ def test_web_pagination_and_date_validation(tmp_path):
         for query in ["page=0", "page=-1", "page_size=0", "page_size=101",
                       "date=not-a-date", "date=2026-02-30"]:
             assert client.get(f"/api/recordings?{query}").status_code == 422
+
+
+def test_trash_and_restore_preserve_wav_and_vad_across_restart(tmp_path):
+    store = RecordingStore(tmp_path)
+    identifier = register_clip(store, "pending")
+    path = store.audio_path(identifier)
+    original = path.read_bytes()
+    assert store.set_trashed(status="all", identifiers=[identifier], expected_count=1) == 1
+    assert store.listing("all")["total"] == 0
+    assert store.listing("all")["trash_count"] == 1
+    assert store.archive_files("all") == []
+    # VAD may finish after the user has moved a closed WAV to Trash.
+    store.complete(identifier, VADResult(vad_status="uncertain"))
+    reopened = RecordingStore(tmp_path)
+    assert reopened.listing("trash")["items"][0]["status"] == "uncertain"
+    assert reopened.audio_path(identifier).read_bytes() == original
+    assert reopened.set_trashed(restore=True, status="trash", identifiers=[identifier],
+                               expected_count=1) == 1
+    assert reopened.listing("uncertain")["total"] == 1
+    assert reopened.listing("trash")["total"] == 0
+    assert path.read_bytes() == original
+
+
+def test_web_trash_scope_confirmation_and_restore(tmp_path):
+    recorder = LiveRecorder(tmp_path, FakeAudio(), FakeVAD())
+    seed_paginated_archive(recorder.store)
+    headers = {"X-Recorder-Control": "1"}
+    selection = {"status": "speech", "recorded_date": "2026-10-23",
+                 "select_all": True, "excluded": ["r0000"], "expected_count": 31}
+    with TestClient(create_app(recorder)) as client:
+        assert client.post("/api/recordings/trash", json=selection).status_code == 403
+        assert client.post("/api/recordings/trash", json=selection,
+                           headers={**headers, "Origin": "https://other-site.test"}).status_code == 403
+        response = client.post("/api/recordings/trash", json={**selection, "expected_count": 30},
+                               headers=headers)
+        assert response.status_code == 409
+        assert recorder.store.listing("trash")["total"] == 0
+        response = client.post("/api/recordings/trash", json=selection, headers=headers)
+        assert response.json() == {"count": 31}
+        assert recorder.store.listing("speech", recorded_date=date(2026, 10, 23))["total"] == 1
+        assert recorder.store.listing("speech", recorded_date=date(2026, 10, 22))["total"] == 1
+        assert recorder.store.listing("all")["total"] == 95
+        assert client.get("/api/recordings?status=trash").json()["total_pages"] == 2
+        # An ID from outside the chosen status/date cannot broaden the selection.
+        assert client.post("/api/recordings/trash", json={
+            "status": "speech", "identifiers": ["r0001"], "expected_count": 1},
+            headers=headers).status_code == 409
+        assert client.post("/api/recordings/trash", json={"status": "all"},
+                           headers=headers).status_code == 422
+        response = client.post("/api/recordings/restore", json={
+            "status": "trash", "select_all": True, "expected_count": 31}, headers=headers)
+        assert response.json() == {"count": 31}
+        assert recorder.store.listing("trash")["total"] == 0
+        assert recorder.store.listing("all")["total"] == 126
