@@ -27,7 +27,7 @@ class VADConfig:
     # Default konservatif untuk recall; kalibrasikan dengan rekaman berlabel.
     speech_threshold: float = 0.35
     non_speech_threshold: float = 0.10
-    min_speech_duration_ms: int = 200
+    min_speech_duration_ms: int = 300
     min_silence_duration_ms: int = 100
     min_analysis_seconds: float = 0.25
 

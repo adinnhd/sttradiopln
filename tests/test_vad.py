@@ -77,21 +77,22 @@ def test_classification_uses_official_timestamps(tmp_path, monkeypatch, probabil
 
 
 def test_brief_noisy_speech_survives_ten_second_tail(tmp_path, monkeypatch):
-    # 224 ms dengan probabilitas moderat, lalu 10 s hening: mean sangat rendah.
-    use_model(monkeypatch, [0.4] * 7 + [0.001] * 313)
-    result = SileroVAD().analyze_file(write_wav(tmp_path, samples=320 * 512))
-    assert result.speech_probability_mean < 0.01
-    assert result.speech_duration_seconds == pytest.approx(.224)
+    # 320 ms dengan probabilitas moderat, lalu 10 s hening: mean tetap rendah.
+    use_model(monkeypatch, [0.4] * 10 + [0.001] * 313)
+    result = SileroVAD().analyze_file(write_wav(tmp_path, samples=323 * 512))
+    assert result.speech_probability_mean < 0.02
+    assert result.speech_duration_seconds == pytest.approx(.320)
     assert result.vad_status == "speech"
 
 
-def test_default_200ms_rejects_128ms_spike_but_100ms_is_configurable(tmp_path, monkeypatch):
-    path = write_wav(tmp_path, samples=317 * 512)
-    use_model(monkeypatch, [0.4] * 4 + [0.001] * 313)
-    assert VADConfig().min_speech_duration_ms == 200
+@pytest.mark.parametrize("windows,override_ms", [(4, 100), (7, 200), (8, 250)])
+def test_default_300ms_keeps_short_spikes_uncertain_but_allows_override(tmp_path, monkeypatch, windows, override_ms):
+    path = write_wav(tmp_path, samples=(windows+313) * 512)
+    use_model(monkeypatch, [0.4] * windows + [0.001] * 313)
+    assert VADConfig().min_speech_duration_ms == 300
     assert SileroVAD().analyze_file(path).vad_status == "uncertain"
-    use_model(monkeypatch, [0.4] * 4 + [0.001] * 313)
-    assert SileroVAD(VADConfig(min_speech_duration_ms=100)).analyze_file(path).vad_status == "speech"
+    use_model(monkeypatch, [0.4] * windows + [0.001] * 313)
+    assert SileroVAD(VADConfig(min_speech_duration_ms=override_ms)).analyze_file(path).vad_status == "speech"
 
 
 def test_weak_noisy_speech_is_uncertain_not_non_speech(tmp_path, monkeypatch):
@@ -102,17 +103,17 @@ def test_weak_noisy_speech_is_uncertain_not_non_speech(tmp_path, monkeypatch):
 
 
 def test_partial_window_padding_weighting_and_duration(tmp_path, monkeypatch):
-    model = use_model(monkeypatch, [0.01] * 9 + [0.8])
-    path = write_wav(tmp_path, samples=9 * 512 + 100)
+    model = use_model(monkeypatch, [0.01] * 10 + [0.8])
+    path = write_wav(tmp_path, samples=10 * 512 + 100)
     result = SileroVAD().analyze_file(path)
-    assert len(model.chunks) == 10
+    assert len(model.chunks) == 11
     assert torch.count_nonzero(model.chunks[-1][100:]) == 0
-    assert result.speech_probability_mean == pytest.approx((9 * 512 * .01 + 100 * .8) / (9 * 512 + 100))
+    assert result.speech_probability_mean == pytest.approx((10 * 512 * .01 + 100 * .8) / (10 * 512 + 100))
     assert result.speech_duration_seconds == 0
     assert result.vad_status == "uncertain"
     use_model(monkeypatch, [0.9])
     result = SileroVAD().analyze_file(path)
-    assert result.speech_duration_seconds == pytest.approx((9 * 512 + 100) / 16000)
+    assert result.speech_duration_seconds == pytest.approx((10 * 512 + 100) / 16000)
 
 
 def test_short_clip_is_uncertain(tmp_path, monkeypatch):

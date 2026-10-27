@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Perekaman dan pemantauan komunikasi radio PLN.">
   <title>Radio PLN — Monitoring komunikasi</title>
-  <link rel="stylesheet" href="/static/style.css">
-  <script src="/static/app.js" type="module"></script>
+  <link rel="stylesheet" href="/static/style.css?v=trash-1">
+  <script src="/static/app.js?v=trash-1" type="module"></script>
 </head>
 <body>
   <header class="app-header">
@@ -32,26 +32,28 @@
           <summary>Pengaturan audio</summary>
           <label class="checkbox-label" for="all-drivers"><input id="all-drivers" type="checkbox"> Tampilkan driver audio lainnya</label>
           <p>Aktifkan jika perangkat yang dicari belum muncul. Dalam daftar lengkap, satu perangkat bisa muncul beberapa kali melalui driver Windows yang berbeda.</p>
-          <label for="channels">Kanal yang dibaca</label>
-          <select id="channels" aria-describedby="channel-help"><option value="1">Mono — satu kanal</option><option value="2">Stereo — dua kanal</option></select>
-          <p id="channel-help">Gunakan mono untuk input satu kanal. Pilih stereo jika audio radio masuk ke dua kanal atau hanya terdengar di sisi kanan.</p>
-          <dl class="config"><div><dt>Ambang suara</dt><dd id="cfg-threshold">-50 dBFS</dd></div><div><dt>Audio sebelum pemicu</dt><dd id="cfg-prebuffer">1 detik</dd></div><div><dt>Batas hening</dt><dd id="cfg-silence">10 detik</dd></div><div><dt>Minimum durasi ucapan</dt><dd id="cfg-vad">200 ms</dd></div></dl>
+          <label for="channels">Mode kanal (lanjutan)</label>
+          <select id="channels" aria-describedby="channel-help"><option value="auto" selected>Otomatis — sesuai perangkat</option><option value="2">Manual: stereo — 2 kanal</option><option value="1">Manual: mono — 1 kanal</option></select>
+          <p id="channel-help">Biarkan Otomatis untuk penggunaan biasa: 2 kanal jika didukung, atau 1 kanal untuk perangkat mono. Mode manual hanya untuk troubleshooting. Jika konfigurasi gagal dibuka, aplikasi menampilkan error tanpa mengganti kanal diam-diam.</p>
+          <dl class="config"><div><dt>Ambang suara</dt><dd id="cfg-threshold">-50 dBFS</dd></div><div><dt>Audio sebelum pemicu</dt><dd id="cfg-prebuffer">1 detik</dd></div><div><dt>Batas hening</dt><dd id="cfg-silence">10 detik</dd></div><div><dt>Minimum durasi ucapan</dt><dd id="cfg-vad">300 ms</dd></div></dl>
         </details>
       </section>
       <section class="panel monitor-panel" aria-labelledby="signal-heading">
         <div class="panel-heading"><h2 id="signal-heading">Sinyal masuk</h2><span id="state" class="state" data-state="stopped"><i></i> Tidak aktif</span></div>
         <div class="level-head"><span>Level audio</span><span><strong id="level">—</strong> <span class="unit">dBFS</span></span></div>
-        <div class="meter" role="meter" aria-label="Level audio" aria-valuemin="-90" aria-valuemax="0" aria-valuenow="-90"><div id="meter-fill"></div><span class="threshold-marker"></span></div>
-        <div class="meter-scale"><span>-90</span><span>-60</span><span>-30</span><span>0 dBFS</span></div>
+        <canvas id="waveform" class="waveform" role="img" aria-label="Gelombang audio masuk dengan penanda waktu dan garis posisi merah. Riwayat 10 detik ada di sebelah kiri garis; sebelah kanan belum direkam.">Gelombang audio berasal dari input recorder Python yang sama. Level terkini tersedia pada angka dBFS.</canvas>
         <p class="threshold-caption">Ambang perekaman <strong id="threshold">-50 dBFS</strong></p>
         <div class="activity-bottom"><div><span class="duration-label">Durasi rekaman</span><div id="duration" class="duration">00:00</div></div><div class="activity-message"><strong id="activity-title">Monitoring belum dimulai</strong><p id="activity-detail">Pilih perangkat audio, lalu mulai monitoring.</p></div></div>
       </section>
     </div>
     <section class="recordings" aria-labelledby="recordings-heading">
       <div class="recordings-heading"><div><h2 id="recordings-heading">Rekaman komunikasi <span id="total-count" class="count">0</span></h2><p>Putar dan periksa hasil rekaman. Semua audio tetap tersimpan.</p></div><span id="queue-status" class="processing" role="status" hidden></span></div>
-      <div class="tabs" role="group" aria-label="Filter rekaman"><button class="tab selected" aria-pressed="true" data-filter="speech">Percakapan <span id="count-speech">0</span></button><button class="tab" aria-pressed="false" data-filter="uncertain">Perlu diperiksa <span id="count-uncertain">0</span></button><button class="tab" aria-pressed="false" data-filter="non-speech">Tanpa percakapan <span id="count-non-speech">0</span></button><button class="tab" aria-pressed="false" data-filter="all">Semua rekaman</button></div>
+      <div class="recording-filters"><label for="recording-date">Tanggal rekaman</label><input id="recording-date" type="date"><button id="clear-date" class="secondary" disabled>Semua tanggal</button></div>
+      <div class="tabs" role="group" aria-label="Filter rekaman"><button class="tab selected" aria-pressed="true" data-filter="speech">Percakapan <span id="count-speech">0</span></button><button class="tab" aria-pressed="false" data-filter="uncertain">Perlu diperiksa <span id="count-uncertain">0</span></button><button class="tab" aria-pressed="false" data-filter="non-speech">Tanpa percakapan <span id="count-non-speech">0</span></button><button class="tab" aria-pressed="false" data-filter="all">Semua rekaman</button><button class="tab" aria-pressed="false" data-filter="trash">Sampah <span id="count-trash">0</span></button></div>
+      <div class="selection-toolbar"><label class="select-all-label"><input id="select-all-recordings" type="checkbox" disabled> Pilih semua hasil filter</label><span id="selection-summary" role="status">0 rekaman dipilih</span><button id="download-recordings" class="secondary download-recordings" disabled>Download terpilih (0)</button><button id="trash-recordings" class="secondary danger" disabled>Hapus terpilih (0)</button><button id="restore-recordings" class="secondary" hidden disabled>Pulihkan terpilih (0)</button></div>
+      <p id="trash-note" class="trash-note" hidden>Rekaman di Sampah bisa dipulihkan. File audio tetap tersimpan dan masih memakai ruang penyimpanan.</p>
       <div id="recording-list" class="recording-list"><div class="empty"><h3>Belum ada percakapan</h3><p>Rekaman percakapan akan muncul setelah komunikasi selesai diperiksa.</p></div></div>
-      <p class="list-note">Menampilkan hingga 100 rekaman terbaru sesuai filter.</p>
+      <div class="pagination"><p id="pagination-summary" role="status">Memuat rekaman...</p><div class="pagination-controls"><button id="previous-page" class="secondary" disabled>Sebelumnya</button><span id="page-status"></span><button id="next-page" class="secondary" disabled>Berikutnya</button></div></div>
     </section>
   </main>
 </body>
