@@ -1,7 +1,7 @@
 """Capture perangkat lokal; satu reader audio dan satu worker VAD serial."""
 
 from collections import deque
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 import json
@@ -180,7 +180,8 @@ class RecordingStore:
 class LiveRecorder:
     def __init__(self, root: Path, audio_backend=None, analyzer=None):
         self.audio = audio_backend if audio_backend is not None else sd
-        self.config = Config()
+        # Live lebih sensitif (-60 dBFS) agar ucapan HT yang pelan tidak terlewat.
+        self.config = Config(threshold_db=-60.0)
         self.vad_config = VADConfig()
         self.store = RecordingStore(root)
         self.analyzer = analyzer if analyzer is not None else SileroVAD(self.vad_config)
@@ -232,7 +233,8 @@ class LiveRecorder:
                       pending=len(self.store.pending()))
         return status
 
-    def start(self, device_id: int, channels: int | None = None):
+    def start(self, device_id: int, channels: int | None = None,
+              threshold_db: float | None = None):
         with self._control:
             if self._closed:
                 raise ValueError("Recorder sudah ditutup")
@@ -246,6 +248,11 @@ class LiveRecorder:
                 channels = min(device["max_channels"], 2)
             if not 1 <= channels <= min(device["max_channels"], 2):
                 raise ValueError("Jumlah kanal tidak didukung (pilih mono/stereo)")
+            if threshold_db is not None:
+                if not -100 <= threshold_db <= -20:
+                    raise ValueError("Ambang harus antara -100 dan -20 dBFS")
+                # Berlaku untuk sesi ini; dicatat di status dan session.json.
+                self.config = replace(self.config, threshold_db=float(threshold_db))
             rate = device["sample_rate"]
             frames = round(rate * .03)
             self.audio.check_input_settings(device=device_id, channels=channels,

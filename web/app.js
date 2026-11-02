@@ -24,14 +24,15 @@ function controls() {
   $('stop').disabled = busy || !connected || !active;
   $('device').disabled = busy || active;
   $('channels').disabled = busy || active;
+  $('threshold-input').disabled = busy || active;
   $('refresh').disabled = busy || active;
   $('all-drivers').disabled = busy || active;
 }
 function deviceHint() {
   const device = devices.find(d => String(d.id) === $('device').value);
-  const stereoOption = [...$('channels').options].find(option => option.value === '2');
-  stereoOption.disabled = !device || device.max_channels < 2;
-  if (stereoOption.disabled && $('channels').value === '2') $('channels').value = 'auto';
+  // Semua opsi kanal selalu bisa dipilih; server menolak dengan pesan jelas
+  // bila perangkat tidak mendukung jumlah kanal yang diminta.
+  [...$('channels').options].forEach(option => { option.disabled = false; });
   const automatic = $('channels').value === 'auto';
   const channels = device ? (automatic ? Math.min(device.max_channels, 2) : Number($('channels').value)) : null;
   $('device-hint').textContent = device
@@ -66,6 +67,7 @@ function renderStatus(s) {
   if (active && devices.some(device => device.id === s.device_id)) {
     $('device').value = String(s.device_id);
     $('channels').value = s.channel_mode === 'auto' ? 'auto' : String(s.channels);
+    if ([...$('threshold-input').options].some(o => o.value === String(s.config.threshold_db))) $('threshold-input').value = String(s.config.threshold_db);
     deviceHint();
   }
   const state = $('state'); state.dataset.state = s.state;
@@ -238,7 +240,8 @@ async function poll() {
 }
 $('start').addEventListener('click',() => command('/api/start',{
   device_id:Number($('device').value),
-  channels:$('channels').value === 'auto' ? null : Number($('channels').value)
+  channels:$('channels').value === 'auto' ? null : Number($('channels').value),
+  threshold_db:Number($('threshold-input').value)
 }));
 $('stop').addEventListener('click',() => command('/api/stop'));
 $('refresh').addEventListener('click',loadDevices);

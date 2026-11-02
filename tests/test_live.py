@@ -149,6 +149,21 @@ def test_manual_mono_override_and_unsupported_stereo(tmp_path):
         recorder.close()
 
 
+def test_threshold_is_selectable_validated_and_saved(tmp_path):
+    recorder = LiveRecorder(tmp_path, FakeAudio(), FakeVAD())
+    try:
+        assert recorder.status()["config"]["threshold_db"] == -60
+        with pytest.raises(ValueError, match="Ambang"):
+            recorder.start(0, None, -10)
+        status = recorder.start(0, None, -50)
+        assert status["config"]["threshold_db"] == -50
+        recorder.stop()
+        session = next(tmp_path.rglob("session.json"))
+        assert json.loads(session.read_text(encoding="utf-8"))["sad"]["threshold_db"] == -50
+    finally:
+        recorder.close()
+
+
 def test_capture_keeps_running_while_vad_busy_and_stop_saves_final_wav(tmp_path):
     backend, gate = FakeAudio(), Event()
     vad = FakeVAD(gate)
@@ -171,7 +186,7 @@ def test_capture_keeps_running_while_vad_busy_and_stop_saves_final_wav(tmp_path)
         assert len(rows) == 2
         assert recorder.status()["state"] == "stopped"
         assert recorder.status()["config"] == {
-            "threshold_db": -50, "prebuffer_seconds": 1, "silence_seconds": 10}
+            "threshold_db": -60, "prebuffer_seconds": 1, "silence_seconds": 10}
         assert recorder.status()["vad_config"]["min_speech_duration_ms"] == 300
         for item in rows:
             info = sf.info(recorder.store.audio_path(item["id"]))

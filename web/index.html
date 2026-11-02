@@ -35,14 +35,17 @@
           <label for="channels">Mode kanal (lanjutan)</label>
           <select id="channels" aria-describedby="channel-help"><option value="auto" selected>Otomatis — sesuai perangkat</option><option value="2">Manual: stereo — 2 kanal</option><option value="1">Manual: mono — 1 kanal</option></select>
           <p id="channel-help">Biarkan Otomatis untuk penggunaan biasa: 2 kanal jika didukung, atau 1 kanal untuk perangkat mono. Mode manual hanya untuk troubleshooting. Jika konfigurasi gagal dibuka, aplikasi menampilkan error tanpa mengganti kanal diam-diam.</p>
-          <dl class="config"><div><dt>Ambang suara</dt><dd id="cfg-threshold">-50 dBFS</dd></div><div><dt>Audio sebelum pemicu</dt><dd id="cfg-prebuffer">1 detik</dd></div><div><dt>Batas hening</dt><dd id="cfg-silence">10 detik</dd></div><div><dt>Minimum durasi ucapan</dt><dd id="cfg-vad">300 ms</dd></div></dl>
+          <label for="threshold-input">Ambang suara (dBFS)</label>
+          <select id="threshold-input" aria-describedby="threshold-help"><option value="-50">-50 — standar lama</option><option value="-55">-55</option><option value="-60" selected>-60 — lebih sensitif (disarankan)</option><option value="-65">-65</option><option value="-70">-70 — sangat sensitif</option></select>
+          <p id="threshold-help">Makin kecil angkanya, makin pelan suara yang terekam, tetapi noise juga lebih mudah ikut masuk. Berlaku saat Mulai monitoring; ubah dengan menghentikan dulu.</p>
+          <dl class="config"><div><dt>Ambang suara</dt><dd id="cfg-threshold">-60 dBFS</dd></div><div><dt>Audio sebelum pemicu</dt><dd id="cfg-prebuffer">1 detik</dd></div><div><dt>Batas hening</dt><dd id="cfg-silence">10 detik</dd></div><div><dt>Minimum durasi ucapan</dt><dd id="cfg-vad">300 ms</dd></div></dl>
         </details>
       </section>
       <section class="panel monitor-panel" aria-labelledby="signal-heading">
         <div class="panel-heading"><h2 id="signal-heading">Sinyal masuk</h2><span id="state" class="state" data-state="stopped"><i></i> Tidak aktif</span></div>
         <div class="level-head"><span>Level audio</span><span><strong id="level">—</strong> <span class="unit">dBFS</span></span></div>
         <canvas id="waveform" class="waveform" role="img" aria-label="Gelombang audio masuk dengan penanda waktu dan garis posisi merah. Riwayat 10 detik ada di sebelah kiri garis; sebelah kanan belum direkam.">Gelombang audio berasal dari input recorder Python yang sama. Level terkini tersedia pada angka dBFS.</canvas>
-        <p class="threshold-caption">Ambang perekaman <strong id="threshold">-50 dBFS</strong></p>
+        <p class="threshold-caption">Ambang perekaman <strong id="threshold">-60 dBFS</strong></p>
         <div class="activity-bottom"><div><span class="duration-label">Durasi rekaman</span><div id="duration" class="duration">00:00</div></div><div class="activity-message"><strong id="activity-title">Monitoring belum dimulai</strong><p id="activity-detail">Pilih perangkat audio, lalu mulai monitoring.</p></div></div>
       </section>
     </div>
