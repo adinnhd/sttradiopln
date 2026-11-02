@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parent
 class StartRequest(BaseModel):
     device_id: int = Field(ge=0)
     channels: int | None = Field(default=None, ge=1, le=2)
+    threshold_db: float | None = Field(default=None, ge=-100, le=-20)
 
 
 class RecordingSelection(BaseModel):
@@ -78,7 +79,8 @@ def create_app(recorder=None):
     @app.post("/api/start")
     def start(body: StartRequest, request: Request):
         try:
-            return request.app.state.recorder.start(body.device_id, body.channels)
+            return request.app.state.recorder.start(
+                body.device_id, body.channels, body.threshold_db)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         except Exception as exc:
